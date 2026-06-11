@@ -213,11 +213,38 @@ def style_abs_derived_rows(ws, code_col: int) -> int:
     return styled_rows
 
 
-def style_fred_us_nonfinancial_rows(ws, row_numbers: list[int]) -> int:
+def style_fred_us_derived_rows(ws, row_numbers: list[int]) -> int:
     for row_no in row_numbers:
         for col_no in range(1, ws.max_column + 1):
             ws.cell(row=row_no, column=col_no).fill = FRED_US_NONFINANCIAL_FILL
     return len(row_numbers)
+
+
+def fred_sheet_indexes(wb: Workbook) -> tuple[dict[str, int], dict[str, int]]:
+    fred_ws = wb["FRED_피벗"]
+    year_to_col = {str(cell.value): cell.column for cell in fred_ws[1][2:] if cell.value is not None}
+    code_to_row = {
+        str(fred_ws.cell(row=row_no, column=1).value): row_no
+        for row_no in range(2, fred_ws.max_row + 1)
+        if fred_ws.cell(row=row_no, column=1).value
+    }
+    return code_to_row, year_to_col
+
+
+def fred_sum_formula(code_to_row: dict[str, int], year_to_col: dict[str, int], year: str, codes: list[str]) -> str:
+    missing_codes = [code for code in codes if code not in code_to_row]
+    if missing_codes:
+        raise KeyError(f"FRED_피벗 sheet is missing required code rows: {', '.join(missing_codes)}")
+    if year not in year_to_col:
+        raise KeyError(f"FRED_피벗 sheet is missing required year column: {year}")
+
+    col_letter = get_column_letter(year_to_col[year])
+    row_numbers = [code_to_row[code] for code in codes]
+    sorted_rows = sorted(row_numbers)
+    if sorted_rows == list(range(sorted_rows[0], sorted_rows[-1] + 1)):
+        return f"=SUM('FRED_피벗'!{col_letter}{sorted_rows[0]}:{col_letter}{sorted_rows[-1]})"
+    refs = ",".join(f"'FRED_피벗'!{col_letter}{row_no}" for row_no in row_numbers)
+    return f"=SUM({refs})"
 
 
 def add_comment(cell, text: str) -> None:
@@ -243,15 +270,22 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
     ws = wb.create_sheet("비금융자산_피벗")
     headers = ["트랜잭션코드", "트랜잭션명", "나라", "화폐단위", *payload["years"]]
     row_index: dict[tuple[str, str, str, str], int] = {}
-    fred_us_nonfinancial_rows: list[int] = []
+    fred_us_derived_rows: list[int] = []
+    fred_formula_rows: list[tuple[int, list[str]]] = []
     rows = [headers]
     for index, row in enumerate(payload["pivot_rows"], start=2):
         key = (row["트랜잭션코드"], row["트랜잭션명"], row["나라"], row["화폐단위"])
         row_index[key] = index
-        if row.get("행강조") == "FRED_US_NONFINANCIAL_NN":
-            fred_us_nonfinancial_rows.append(index)
+        if row.get("행강조") in {"FRED_US_NONFINANCIAL_NN", "FRED_US_REAL_ESTATE"}:
+            fred_us_derived_rows.append(index)
+        if row.get("FRED합산코드"):
+            fred_formula_rows.append((index, list(row["FRED합산코드"])))
         rows.append([row["트랜잭션코드"], row["트랜잭션명"], row["나라"], row["화폐단위"], *[row.get(year) for year in payload["years"]]])
     append_rows(ws, rows)
+    fred_code_to_row, fred_year_to_col = fred_sheet_indexes(wb)
+    for row_no, codes in fred_formula_rows:
+        for year_idx, year in enumerate(payload["years"], start=5):
+            ws.cell(row=row_no, column=year_idx).value = fred_sum_formula(fred_code_to_row, fred_year_to_col, str(year), codes)
     format_sheet(ws, freeze_cols=4)
     set_number_format(ws, 5, 2, "#,##0")
     for note in payload["notes"]:
@@ -275,7 +309,7 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
             ),
         )
     style_korea_rows(ws, country_col=3)
-    style_fred_us_nonfinancial_rows(ws, fred_us_nonfinancial_rows)
+    style_fred_us_derived_rows(ws, fred_us_derived_rows)
 
     code_ws = wb.create_sheet("비금융자산_코드")
     append_rows(code_ws, [["트랜잭션코드", "트랜잭션명"], *[[row["트랜잭션코드"], row["트랜잭션명"]] for row in payload["codes"]]])
@@ -368,7 +402,7 @@ def build_info_sheet(wb: Workbook, payloads: dict[str, Any]) -> None:
         ["항목", "내용"],
         ["FRED", f"행 {payloads['fred']['summary']['행수']}, 연도 {payloads['fred']['years'][0]}-{payloads['fred']['years'][-1]}, 코드순서 유지"],
         ["OECD 비금융자산", f"Total economy, 요청 트랜잭션 순서 유지, 비확정값 메모 {payloads['table9b']['summary']['비확정값_노트수']}개"],
-        ["FRED 미국 비금융자산", f"OECD 비금융자산 NN 미국 결측분을 FRED 6개 코드 합산으로 보강 {payloads['table9b']['summary'].get('FRED_US_NN_보강행수', 0)}행, 연한 빨간색 표시"],
+        ["FRED 미국 비금융자산", f"OECD 비금융자산 NN 미국 결측분을 FRED 6개 코드 SUM 수식으로 보강 {payloads['table9b']['summary'].get('FRED_US_NN_보강행수', 0)}행, 부동산 3개 코드 SUM 수식 {payloads['table9b']['summary'].get('FRED_US_부동산_보강행수', 0)}행, 연한 빨간색 표시"],
         ["OECD 금융순자산", f"국가 행/연도 열 피벗, 비확정값 메모 {payloads['financial']['summary']['메모수']}개"],
         ["ABS 호주 순금융자산", f"ABS 520410 산출 행 {payloads['financial']['summary'].get('ABS_520410_보강행수', 0)}개, 금융자산-부채로 계산 후 옅은 보라색 표시"],
         ["OECD GDP", f"OECD 회원국 {payloads['gdp']['summary']['OECD회원국수']}개, 지출접근 보강 {payloads['gdp']['summary']['지출접근보강셀수']}셀, 비확정값 메모 {payloads['gdp']['summary']['메모수']}개"],
@@ -396,12 +430,15 @@ def build_workbook(payloads: dict[str, Any]) -> None:
     build_financial_sheet(wb, payloads["financial"])
     build_gdp_sheet(wb, payloads["gdp"])
     build_info_sheet(wb, payloads)
+    wb.calculation.calcMode = "auto"
+    wb.calculation.fullCalcOnLoad = True
+    wb.calculation.forceFullCalc = True
     wb.save(FINAL_WORKBOOK)
 
 
 def verify_workbook() -> dict[str, int | str]:
     wb = load_workbook(FINAL_WORKBOOK)
-    comments = purple = yellow = korea_rows = korea_cells = abs_rows = abs_cells = fred_us_rows = fred_us_cells = 0
+    comments = purple = yellow = korea_rows = korea_cells = abs_rows = abs_cells = fred_us_rows = fred_us_cells = fred_us_formula_cells = 0
     country_columns = {"비금융자산_피벗": 3, "금융순자산_피벗": 1, "GDP_OECD회원국": 1}
     for ws in wb.worksheets:
         country_col = country_columns.get(ws.title)
@@ -411,8 +448,9 @@ def verify_workbook() -> dict[str, int | str]:
             is_fred_us_row = (
                 ws.title == "비금융자산_피벗"
                 and row[0].row > 1
-                and ws.cell(row=row[0].row, column=1).value == "NN"
                 and ws.cell(row=row[0].row, column=3).value == "United States"
+                and ws.cell(row=row[0].row, column=2).value
+                in {"Total non-financial assets, net", "Real estate at market value (FRED 3-series sum)"}
             )
             if is_korea_row:
                 korea_rows += 1
@@ -436,6 +474,8 @@ def verify_workbook() -> dict[str, int | str]:
                     abs_cells += 1
                 if is_fred_us_row and fill == "00F4CCCC":
                     fred_us_cells += 1
+                if is_fred_us_row and cell.column >= 5 and isinstance(cell.value, str) and cell.value.startswith("=SUM("):
+                    fred_us_formula_cells += 1
     return {
         "sheet_count": len(wb.sheetnames),
         "comments": comments,
@@ -445,8 +485,9 @@ def verify_workbook() -> dict[str, int | str]:
         "korea_highlight_cells": korea_cells,
         "abs_520410_highlight_rows": abs_rows,
         "abs_520410_highlight_cells": abs_cells,
-        "fred_us_nonfinancial_highlight_rows": fred_us_rows,
-        "fred_us_nonfinancial_highlight_cells": fred_us_cells,
+        "fred_us_derived_highlight_rows": fred_us_rows,
+        "fred_us_derived_highlight_cells": fred_us_cells,
+        "fred_us_derived_formula_cells": fred_us_formula_cells,
         "file_size": FINAL_WORKBOOK.stat().st_size,
     }
 
