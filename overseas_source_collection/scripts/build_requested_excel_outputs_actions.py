@@ -10,6 +10,7 @@ import json
 import pathlib
 import subprocess
 import sys
+import zipfile
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
@@ -22,6 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / "outputs" / "requested_pivot_workbook"
 FINAL_WORKBOOK = OUT_DIR / "요청사항반영_피벗통합_메모포함.xlsx"
 BUILD_LOG = OUT_DIR / "요청사항반영_엑셀생성로그.csv"
+SOURCE_ARCHIVE = OUT_DIR / "요청사항반영_원본자료.zip"
 
 NORMALIZER_SCRIPTS = [
     ROOT / "overseas_source_collection/scripts/collect_fred_us_series.py",
@@ -44,6 +46,16 @@ PAYLOAD_PATHS = {
     "financial": ROOT / "outputs/oecd_financial_net_worth_pivot/financial_net_worth_pivot_payload.json",
     "gdp": ROOT / "outputs/oecd_gdp_pivot/gdp_oecd_members_pivot_payload.json",
 }
+
+SOURCE_ARCHIVE_DIRS = [
+    ROOT / "overseas_source_collection/fred_us",
+    ROOT / "overseas_source_collection/oecd_table9b_nonfinancial_assets",
+    ROOT / "overseas_source_collection/oecd_financial_net_worth",
+    ROOT / "overseas_source_collection/oecd_gdp_output_expenditure",
+]
+SOURCE_ARCHIVE_FILES = [
+    ROOT / "overseas_source_collection/source_targets.csv",
+]
 
 
 HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
@@ -87,6 +99,33 @@ def run_step(label: str, command: list[str]) -> dict[str, str]:
             print(result.stderr.strip(), flush=True)
         raise RuntimeError(f"{label} failed")
     return row
+
+
+def include_in_source_archive(path: pathlib.Path) -> bool:
+    if path.name == ".DS_Store" or path.suffix == ".pyc":
+        return False
+    return "__pycache__" not in path.parts
+
+
+def create_source_archive() -> int:
+    SOURCE_ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
+    SOURCE_ARCHIVE.unlink(missing_ok=True)
+    file_count = 0
+    with zipfile.ZipFile(SOURCE_ARCHIVE, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for source_dir in SOURCE_ARCHIVE_DIRS:
+            if not source_dir.exists():
+                continue
+            for path in sorted(source_dir.rglob("*")):
+                if not path.is_file() or not include_in_source_archive(path):
+                    continue
+                archive.write(path, path.relative_to(ROOT).as_posix())
+                file_count += 1
+        for source_file in SOURCE_ARCHIVE_FILES:
+            if not source_file.exists() or not source_file.is_file() or not include_in_source_archive(source_file):
+                continue
+            archive.write(source_file, source_file.relative_to(ROOT).as_posix())
+            file_count += 1
+    return file_count
 
 
 def load_payloads() -> dict[str, Any]:
@@ -261,6 +300,7 @@ def build_gdp_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
     append_rows(ws, rows)
     format_sheet(ws, freeze_cols=4)
     set_number_format(ws, 5, 2, "#,##0")
+    style_korea_rows(ws, country_col=1)
     fallback_addresses: set[tuple[int, int]] = set()
     for fallback in payload["fallback_cells"]:
         row_no = row_index.get(fallback["국가코드"])
@@ -293,7 +333,6 @@ def build_gdp_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
                 ]
             ),
         )
-    style_korea_rows(ws, country_col=1)
 
 
 def build_info_sheet(wb: Workbook, payloads: dict[str, Any]) -> None:
@@ -304,6 +343,7 @@ def build_info_sheet(wb: Workbook, payloads: dict[str, Any]) -> None:
         ["OECD 비금융자산", f"Total economy, 요청 트랜잭션 순서 유지, 비확정값 메모 {payloads['table9b']['summary']['비확정값_노트수']}개"],
         ["OECD 금융순자산", f"국가 행/연도 열 피벗, 비확정값 메모 {payloads['financial']['summary']['메모수']}개"],
         ["OECD GDP", f"OECD 회원국 {payloads['gdp']['summary']['OECD회원국수']}개, 지출접근 보강 {payloads['gdp']['summary']['지출접근보강셀수']}셀, 비확정값 메모 {payloads['gdp']['summary']['메모수']}개"],
+        ["GDP 한국 예외", f"한국 산출접근 값이 Estimated value이면 지출접근법 후보 우선 사용 {payloads['gdp']['summary'].get('한국추정값_지출접근우선셀수', 0)}셀"],
         ["GDP 보강 표시", "지출접근법으로 보강한 셀은 보라색 채우기"],
         ["비확정값 표시", "관측상태가 A가 아닌 셀은 메모만 작성. GDP 지출접근 보강 셀은 보라색 채우기"],
         ["FRED 원천", payloads["fred"]["summary"]["원천파일"]],
@@ -380,7 +420,10 @@ def main() -> int:
     payloads = load_payloads()
     started = dt.datetime.now().astimezone()
     build_workbook(payloads)
+    source_archive_file_count = create_source_archive()
     verification = verify_workbook()
+    verification["source_archive_files"] = source_archive_file_count
+    verification["source_archive_size"] = SOURCE_ARCHIVE.stat().st_size
     finished = dt.datetime.now().astimezone()
     log_rows.append(
         {
@@ -398,6 +441,7 @@ def main() -> int:
     print(json.dumps(verification, ensure_ascii=False))
     print(f"workbook={FINAL_WORKBOOK}")
     print(f"log={BUILD_LOG}")
+    print(f"source_archive={SOURCE_ARCHIVE}")
     return 0
 
 

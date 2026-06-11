@@ -47,6 +47,8 @@ jobs:
             "release_assets/requested_pivot_workbook_${{ steps.timestamp.outputs.collection_ts }}.xlsx"
           cp "outputs/requested_pivot_workbook/요청사항반영_엑셀생성로그.csv" \
             "release_assets/build_log_${{ steps.timestamp.outputs.collection_ts }}.csv"
+          cp "outputs/requested_pivot_workbook/요청사항반영_원본자료.zip" \
+            "release_assets/source_materials_${{ steps.timestamp.outputs.collection_ts }}.zip"
 
       - name: Create GitHub Release
         env:
@@ -55,4 +57,4 @@ jobs:
           gh release create "${{ steps.timestamp.outputs.tag }}" \
             release_assets/* \
             --title "${{ steps.timestamp.outputs.title }}" \
-            --notes "주간 해외자료 자동 수집 및 요청사항 반영 피벗 엑셀 생성 결과입니다. 수집 기준시각: ${{ steps.timestamp.outputs.collection_ts }}"
+            --notes "주간 해외자료 자동 수집 및 요청사항 반영 피벗 엑셀 생성 결과입니다. 수집 기준시각: ${{ steps.timestamp.outputs.collection_ts }}. 릴리스에는 피벗 엑셀, 생성 로그, 결과물 생성에 사용한 원본자료 zip이 포함됩니다."

@@ -24,6 +24,10 @@ def parse_number(value: str) -> float | None:
     return float(value)
 
 
+def is_estimated(row: dict[str, str]) -> bool:
+    return row["관측상태코드"] == "E" or "estimated" in row["관측상태명"].lower()
+
+
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     with LONG_CSV.open(newline="", encoding="utf-8-sig") as handle:
@@ -47,6 +51,7 @@ def main() -> int:
     missing_cells: list[dict[str, str]] = []
     selected_output = 0
     selected_expenditure = 0
+    korea_estimated_expenditure_priority = 0
 
     for country_code in sorted(country_names, key=lambda code: (country_names[code], code)):
         country = country_names[country_code]
@@ -58,10 +63,21 @@ def main() -> int:
         }
         for year in YEARS:
             candidates = by_country_year.get((country_code, year), {})
-            chosen = candidates.get("산출접근법")
+            output_candidate = candidates.get("산출접근법")
+            expenditure_candidate = candidates.get("지출접근법")
+            chosen = output_candidate
             source = "산출접근법"
-            if chosen is None:
-                chosen = candidates.get("지출접근법")
+            if (
+                country_code == "KOR"
+                and output_candidate is not None
+                and expenditure_candidate is not None
+                and is_estimated(output_candidate)
+            ):
+                chosen = expenditure_candidate
+                source = "지출접근법"
+                korea_estimated_expenditure_priority += 1
+            elif chosen is None:
+                chosen = expenditure_candidate
                 source = "지출접근법"
             if chosen is None:
                 pivot_row[year] = None
@@ -114,12 +130,13 @@ def main() -> int:
         "missing_cells": missing_cells,
         "summary": {
             "데이터셋": "OECD Annual GDP and components - output/expenditure approach",
-            "값정의": "산출접근법 GDP(B1GQ)를 우선 사용하고, 산출접근 값이 없는 경우 지출접근법 GDP(B1GQ)로 보강",
+            "값정의": "산출접근법 GDP(B1GQ)를 우선 사용하고, 산출접근 값이 없는 경우 지출접근법 GDP(B1GQ)로 보강. 단, 한국 산출접근 값이 Estimated value이면 지출접근법 후보를 우선 사용",
             "수집일시": log_row["수집일시"],
             "기간": "2014-2025",
             "단위": "백만 현지통화, current prices, national currency",
             "산출접근선택셀수": selected_output,
             "지출접근보강셀수": selected_expenditure,
+            "한국추정값_지출접근우선셀수": korea_estimated_expenditure_priority,
             "결측셀수": len(missing_cells),
             "행수": len(pivot_rows),
             "연도수": len(YEARS),

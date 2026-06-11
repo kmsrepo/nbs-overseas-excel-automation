@@ -14,6 +14,7 @@ The release includes:
 
 - `요청사항반영_피벗통합_메모포함_<수집시각>.xlsx`
 - `요청사항반영_엑셀생성로그_<수집시각>.csv`
+- `source_materials_<수집시각>.zip`: 결과물 생성에 사용한 FRED/OECD 원본자료, 정규화 CSV, 메타데이터, 수집 로그
 
 ## Local Run
 
@@ -39,5 +40,5 @@ outputs/requested_pivot_workbook/요청사항반영_피벗통합_메모포함.xl
 - `비금융자산_피벗`: OECD Table 9B, Total economy, requested transaction order, non-final values commented
 - `비금융자산_코드`: transaction code reference
 - `금융순자산_피벗`: financial net worth by country/year, non-final values commented
-- `GDP_OECD회원국`: OECD member countries only, output approach first, expenditure approach fallback in purple, non-final values commented
+- `GDP_OECD회원국`: OECD member countries only, output approach first, expenditure approach fallback in purple, non-final values commented. For Korea, expenditure approach is preferred when the output approach value is estimated.
 - `수집정보`: build summary
