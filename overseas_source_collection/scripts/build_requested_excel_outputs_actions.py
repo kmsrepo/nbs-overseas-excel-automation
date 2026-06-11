@@ -53,6 +53,8 @@ THIN_GRAY = Side(style="thin", color="D9E2F3")
 PURPLE_FILL = PatternFill("solid", fgColor="D9D2E9")
 PURPLE_FONT = Font(name="Calibri", size=10, bold=True, color="351C75")
 PURPLE_BORDER = Border(outline=True, left=Side(style="thin", color="674EA7"), right=Side(style="thin", color="674EA7"), top=Side(style="thin", color="674EA7"), bottom=Side(style="thin", color="674EA7"))
+KOREA_FILL = PatternFill("solid", fgColor="E2F0D9")
+KOREA_FONT_COLOR = "0000FF"
 
 
 def write_csv(path: pathlib.Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
@@ -136,6 +138,27 @@ def format_comment_cell(cell, number_format: str = "#,##0") -> None:
     cell.number_format = number_format
 
 
+def style_korea_rows(ws, country_col: int) -> int:
+    styled_rows = 0
+    for row_no in range(2, ws.max_row + 1):
+        if ws.cell(row=row_no, column=country_col).value != "Korea":
+            continue
+        styled_rows += 1
+        for col_no in range(1, ws.max_column + 1):
+            cell = ws.cell(row=row_no, column=col_no)
+            cell.fill = KOREA_FILL
+            cell.font = Font(
+                name=cell.font.name or "Calibri",
+                size=cell.font.sz or 10,
+                bold=cell.font.bold,
+                italic=cell.font.italic,
+                underline=cell.font.underline,
+                strike=cell.font.strike,
+                color=KOREA_FONT_COLOR,
+            )
+    return styled_rows
+
+
 def add_comment(cell, text: str) -> None:
     cell.comment = Comment(text, "Codex")
 
@@ -187,6 +210,7 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
                 ]
             ),
         )
+    style_korea_rows(ws, country_col=3)
 
     code_ws = wb.create_sheet("비금융자산_코드")
     append_rows(code_ws, [["트랜잭션코드", "트랜잭션명"], *[[row["트랜잭션코드"], row["트랜잭션명"]] for row in payload["codes"]]])
@@ -223,6 +247,7 @@ def build_financial_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
                 ]
             ),
         )
+    style_korea_rows(ws, country_col=1)
 
 
 def build_gdp_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
@@ -268,6 +293,7 @@ def build_gdp_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
                 ]
             ),
         )
+    style_korea_rows(ws, country_col=1)
 
 
 def build_info_sheet(wb: Workbook, payloads: dict[str, Any]) -> None:
@@ -306,9 +332,14 @@ def build_workbook(payloads: dict[str, Any]) -> None:
 
 def verify_workbook() -> dict[str, int | str]:
     wb = load_workbook(FINAL_WORKBOOK)
-    comments = purple = yellow = 0
+    comments = purple = yellow = korea_rows = korea_cells = 0
+    country_columns = {"비금융자산_피벗": 3, "금융순자산_피벗": 1, "GDP_OECD회원국": 1}
     for ws in wb.worksheets:
+        country_col = country_columns.get(ws.title)
         for row in ws.iter_rows():
+            is_korea_row = bool(country_col and row[0].row > 1 and ws.cell(row=row[0].row, column=country_col).value == "Korea")
+            if is_korea_row:
+                korea_rows += 1
             for cell in row:
                 if cell.comment:
                     comments += 1
@@ -317,11 +348,17 @@ def verify_workbook() -> dict[str, int | str]:
                     purple += 1
                 if fill == "00FFF2CC":
                     yellow += 1
+                if is_korea_row and fill == "00E2F0D9":
+                    font_color = cell.font.color.rgb if cell.font.color and cell.font.color.type == "rgb" else ""
+                    if font_color == "000000FF":
+                        korea_cells += 1
     return {
         "sheet_count": len(wb.sheetnames),
         "comments": comments,
         "purple_fills": purple,
         "yellow_fills": yellow,
+        "korea_highlight_rows": korea_rows,
+        "korea_highlight_cells": korea_cells,
         "file_size": FINAL_WORKBOOK.stat().st_size,
     }
 
