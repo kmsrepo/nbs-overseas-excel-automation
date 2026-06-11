@@ -21,6 +21,10 @@ LATEST_RELEASE_URL = (
     "https://www.abs.gov.au/statistics/economy/national-accounts/"
     "australian-system-national-accounts/latest-release"
 )
+FALLBACK_WORKBOOK_URL = (
+    "https://www.abs.gov.au/statistics/economy/national-accounts/"
+    "australian-system-national-accounts/2024-25/5204010_National_Balance_Sheet.xlsx"
+)
 START_YEAR = 2007
 END_YEAR = 2025
 FINANCIAL_ASSETS_SERIES_ID = "A2421138R"
@@ -45,10 +49,13 @@ def fetch_bytes(url: str, accept: str | None = None) -> bytes:
 
 
 def latest_workbook_url() -> str:
-    html = fetch_bytes(LATEST_RELEASE_URL, "text/html").decode("utf-8", errors="replace")
+    try:
+        html = fetch_bytes(LATEST_RELEASE_URL, "text/html").decode("utf-8", errors="replace")
+    except subprocess.CalledProcessError:
+        return FALLBACK_WORKBOOK_URL
     match = re.search(r'href="([^"]*5204010_National_Balance_Sheet\.xlsx[^"]*)"', html)
     if not match:
-        raise RuntimeError("ABS latest release page did not contain 5204010_National_Balance_Sheet.xlsx")
+        return FALLBACK_WORKBOOK_URL
     return urljoin(LATEST_RELEASE_URL, match.group(1))
 
 
