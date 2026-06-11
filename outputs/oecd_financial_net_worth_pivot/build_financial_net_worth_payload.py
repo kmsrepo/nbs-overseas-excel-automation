@@ -11,9 +11,12 @@ from collections import defaultdict
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SOURCE_DIR = ROOT / "overseas_source_collection" / "oecd_financial_net_worth"
+ABS_SOURCE_DIR = ROOT / "overseas_source_collection" / "abs_520410_national_balance_sheet"
 OUT_DIR = ROOT / "outputs" / "oecd_financial_net_worth_pivot"
 LONG_CSV = SOURCE_DIR / "oecd_financial_net_worth_lbf90nc_2007_2025_장형.csv"
 LOG_CSV = SOURCE_DIR / "oecd_financial_net_worth_lbf90nc_수집로그.csv"
+ABS_LONG_CSV = ABS_SOURCE_DIR / "abs_520410_순금융자산_2007_2025.csv"
+ABS_LOG_CSV = ABS_SOURCE_DIR / "abs_520410_수집로그.csv"
 NORMAL_STATUS = {"A"}
 
 
@@ -21,6 +24,35 @@ def parse_number(value: str) -> float | None:
     if value in {"", "."}:
         return None
     return float(value)
+
+
+def load_abs_row(years: list[str]) -> tuple[dict[str, object] | None, dict[str, str] | None]:
+    if not ABS_LONG_CSV.exists():
+        return None, None
+    with ABS_LONG_CSV.open(newline="", encoding="utf-8-sig") as handle:
+        abs_rows = list(csv.DictReader(handle))
+    if not abs_rows:
+        return None, None
+    abs_by_year = {row["연도"]: row for row in abs_rows}
+    pivot_row: dict[str, object] = {
+        "나라": "Australia (ABS 520410)",
+        "국가코드": "AUS_ABS",
+        "화폐단위": "AUD",
+        "지표코드": "LBF90NC",
+        "새지표코드": "ABS520410_NET_FINANCIAL_WORTH",
+        "지표명": "Net financial worth derived from ABS 5204.0 Table 10",
+        "단위": "백만 현지통화",
+        "행강조": "ABS_520410",
+    }
+    for year in years:
+        row = abs_by_year.get(year)
+        pivot_row[year] = parse_number(row["순금융자산_백만AUD"]) if row else None
+    abs_log = None
+    if ABS_LOG_CSV.exists():
+        with ABS_LOG_CSV.open(newline="", encoding="utf-8-sig") as handle:
+            abs_log_rows = list(csv.DictReader(handle))
+        abs_log = abs_log_rows[0] if abs_log_rows else None
+    return pivot_row, abs_log
 
 
 def main() -> int:
@@ -76,6 +108,11 @@ def main() -> int:
                 )
         pivot_rows.append(pivot_row)
 
+    abs_row, abs_log = load_abs_row(years)
+    if abs_row:
+        pivot_rows.append(abs_row)
+        pivot_rows.sort(key=lambda row: (str(row["나라"]).replace(" (ABS 520410)", ""), str(row["나라"]), str(row["화폐단위"])))
+
     payload = {
         "years": years,
         "pivot_rows": pivot_rows,
@@ -93,6 +130,11 @@ def main() -> int:
             "행수": len(pivot_rows),
             "연도수": len(years),
             "메모수": len(notes),
+            "ABS_520410_보강행수": 1 if abs_row else 0,
+            "ABS_520410_원천파일": str(ABS_LONG_CSV) if abs_row else "",
+            "ABS_520410_수집로그": str(ABS_LOG_CSV) if abs_row else "",
+            "ABS_520410_원자료주소": abs_log.get("원자료주소", "") if abs_log else "",
+            "ABS_520410_값정의": "A2421138R Financial assets with the rest of the world - A2421145L Liabilities to the rest of the world, billion AUD * 1000",
         },
         "collection_log": log_rows,
     }

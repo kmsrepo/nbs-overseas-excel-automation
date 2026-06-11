@@ -29,6 +29,7 @@ NORMALIZER_SCRIPTS = [
     ROOT / "overseas_source_collection/scripts/collect_fred_us_series.py",
     ROOT / "overseas_source_collection/scripts/collect_oecd_table9b_nonfinancial_assets.py",
     ROOT / "overseas_source_collection/scripts/collect_oecd_financial_net_worth.py",
+    ROOT / "overseas_source_collection/scripts/collect_abs_520410_national_balance_sheet.py",
     ROOT / "overseas_source_collection/scripts/collect_oecd_gdp_output_expenditure.py",
 ]
 
@@ -49,6 +50,7 @@ PAYLOAD_PATHS = {
 
 SOURCE_ARCHIVE_DIRS = [
     ROOT / "overseas_source_collection/fred_us",
+    ROOT / "overseas_source_collection/abs_520410_national_balance_sheet",
     ROOT / "overseas_source_collection/oecd_table9b_nonfinancial_assets",
     ROOT / "overseas_source_collection/oecd_financial_net_worth",
     ROOT / "overseas_source_collection/oecd_gdp_output_expenditure",
@@ -67,6 +69,7 @@ PURPLE_FONT = Font(name="Calibri", size=10, bold=True, color="351C75")
 PURPLE_BORDER = Border(outline=True, left=Side(style="thin", color="674EA7"), right=Side(style="thin", color="674EA7"), top=Side(style="thin", color="674EA7"), bottom=Side(style="thin", color="674EA7"))
 KOREA_FILL = PatternFill("solid", fgColor="E2F0D9")
 KOREA_FONT_COLOR = "0000FF"
+ABS_DERIVED_FILL = PatternFill("solid", fgColor="EADCF8")
 
 
 def write_csv(path: pathlib.Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
@@ -198,6 +201,17 @@ def style_korea_rows(ws, country_col: int) -> int:
     return styled_rows
 
 
+def style_abs_derived_rows(ws, code_col: int) -> int:
+    styled_rows = 0
+    for row_no in range(2, ws.max_row + 1):
+        if ws.cell(row=row_no, column=code_col).value != "AUS_ABS":
+            continue
+        styled_rows += 1
+        for col_no in range(1, ws.max_column + 1):
+            ws.cell(row=row_no, column=col_no).fill = ABS_DERIVED_FILL
+    return styled_rows
+
+
 def add_comment(cell, text: str) -> None:
     cell.comment = Comment(text, "Codex")
 
@@ -287,6 +301,7 @@ def build_financial_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
             ),
         )
     style_korea_rows(ws, country_col=1)
+    style_abs_derived_rows(ws, code_col=2)
 
 
 def build_gdp_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
@@ -342,6 +357,7 @@ def build_info_sheet(wb: Workbook, payloads: dict[str, Any]) -> None:
         ["FRED", f"행 {payloads['fred']['summary']['행수']}, 연도 {payloads['fred']['years'][0]}-{payloads['fred']['years'][-1]}, 코드순서 유지"],
         ["OECD 비금융자산", f"Total economy, 요청 트랜잭션 순서 유지, 비확정값 메모 {payloads['table9b']['summary']['비확정값_노트수']}개"],
         ["OECD 금융순자산", f"국가 행/연도 열 피벗, 비확정값 메모 {payloads['financial']['summary']['메모수']}개"],
+        ["ABS 호주 순금융자산", f"ABS 520410 산출 행 {payloads['financial']['summary'].get('ABS_520410_보강행수', 0)}개, 금융자산-부채로 계산 후 옅은 보라색 표시"],
         ["OECD GDP", f"OECD 회원국 {payloads['gdp']['summary']['OECD회원국수']}개, 지출접근 보강 {payloads['gdp']['summary']['지출접근보강셀수']}셀, 비확정값 메모 {payloads['gdp']['summary']['메모수']}개"],
         ["GDP 한국 예외", f"한국 산출접근 값이 Estimated value이면 지출접근법 후보 우선 사용 {payloads['gdp']['summary'].get('한국추정값_지출접근우선셀수', 0)}셀"],
         ["GDP 보강 표시", "지출접근법으로 보강한 셀은 보라색 채우기"],
@@ -372,14 +388,17 @@ def build_workbook(payloads: dict[str, Any]) -> None:
 
 def verify_workbook() -> dict[str, int | str]:
     wb = load_workbook(FINAL_WORKBOOK)
-    comments = purple = yellow = korea_rows = korea_cells = 0
+    comments = purple = yellow = korea_rows = korea_cells = abs_rows = abs_cells = 0
     country_columns = {"비금융자산_피벗": 3, "금융순자산_피벗": 1, "GDP_OECD회원국": 1}
     for ws in wb.worksheets:
         country_col = country_columns.get(ws.title)
         for row in ws.iter_rows():
             is_korea_row = bool(country_col and row[0].row > 1 and ws.cell(row=row[0].row, column=country_col).value == "Korea")
+            is_abs_row = ws.title == "금융순자산_피벗" and row[0].row > 1 and ws.cell(row=row[0].row, column=2).value == "AUS_ABS"
             if is_korea_row:
                 korea_rows += 1
+            if is_abs_row:
+                abs_rows += 1
             for cell in row:
                 if cell.comment:
                     comments += 1
@@ -392,6 +411,8 @@ def verify_workbook() -> dict[str, int | str]:
                     font_color = cell.font.color.rgb if cell.font.color and cell.font.color.type == "rgb" else ""
                     if font_color == "000000FF":
                         korea_cells += 1
+                if is_abs_row and fill == "00EADCF8":
+                    abs_cells += 1
     return {
         "sheet_count": len(wb.sheetnames),
         "comments": comments,
@@ -399,6 +420,8 @@ def verify_workbook() -> dict[str, int | str]:
         "yellow_fills": yellow,
         "korea_highlight_rows": korea_rows,
         "korea_highlight_cells": korea_cells,
+        "abs_520410_highlight_rows": abs_rows,
+        "abs_520410_highlight_cells": abs_cells,
         "file_size": FINAL_WORKBOOK.stat().st_size,
     }
 
