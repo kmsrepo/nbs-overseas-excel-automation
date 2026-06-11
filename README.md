@@ -38,7 +38,7 @@ outputs/requested_pivot_workbook/요청사항반영_피벗통합_메모포함.xl
 ## Workbook Content
 
 - `FRED_피벗`: requested FRED codes, code order preserved, years as columns
-- `비금융자산_피벗`: OECD Table 9B, Total economy, requested transaction order, non-final values commented
+- `비금융자산_피벗`: OECD Table 9B, Total economy, requested transaction order, non-final values commented. The missing `NN / United States` row is supplemented by summing the six requested FRED non-financial asset series and highlighted in light red.
 - `비금융자산_코드`: transaction code reference
 - `금융순자산_피벗`: financial net worth by country/year, non-final values commented. The derived `Australia (ABS 520410)` row is calculated from latest ABS 520410 current-price financial assets minus liabilities and highlighted in light purple.
 - `GDP_OECD회원국`: OECD member countries only, output approach first, expenditure approach fallback in purple, non-final values commented. For Korea, expenditure approach is preferred when the output approach value is estimated.

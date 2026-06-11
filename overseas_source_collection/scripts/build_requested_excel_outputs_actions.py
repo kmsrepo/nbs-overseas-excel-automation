@@ -70,6 +70,7 @@ PURPLE_BORDER = Border(outline=True, left=Side(style="thin", color="674EA7"), ri
 KOREA_FILL = PatternFill("solid", fgColor="E2F0D9")
 KOREA_FONT_COLOR = "0000FF"
 ABS_DERIVED_FILL = PatternFill("solid", fgColor="EADCF8")
+FRED_US_NONFINANCIAL_FILL = PatternFill("solid", fgColor="F4CCCC")
 
 
 def write_csv(path: pathlib.Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
@@ -212,6 +213,13 @@ def style_abs_derived_rows(ws, code_col: int) -> int:
     return styled_rows
 
 
+def style_fred_us_nonfinancial_rows(ws, row_numbers: list[int]) -> int:
+    for row_no in row_numbers:
+        for col_no in range(1, ws.max_column + 1):
+            ws.cell(row=row_no, column=col_no).fill = FRED_US_NONFINANCIAL_FILL
+    return len(row_numbers)
+
+
 def add_comment(cell, text: str) -> None:
     cell.comment = Comment(text, "Codex")
 
@@ -235,10 +243,13 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
     ws = wb.create_sheet("비금융자산_피벗")
     headers = ["트랜잭션코드", "트랜잭션명", "나라", "화폐단위", *payload["years"]]
     row_index: dict[tuple[str, str, str, str], int] = {}
+    fred_us_nonfinancial_rows: list[int] = []
     rows = [headers]
     for index, row in enumerate(payload["pivot_rows"], start=2):
         key = (row["트랜잭션코드"], row["트랜잭션명"], row["나라"], row["화폐단위"])
         row_index[key] = index
+        if row.get("행강조") == "FRED_US_NONFINANCIAL_NN":
+            fred_us_nonfinancial_rows.append(index)
         rows.append([row["트랜잭션코드"], row["트랜잭션명"], row["나라"], row["화폐단위"], *[row.get(year) for year in payload["years"]]])
     append_rows(ws, rows)
     format_sheet(ws, freeze_cols=4)
@@ -264,6 +275,7 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
             ),
         )
     style_korea_rows(ws, country_col=3)
+    style_fred_us_nonfinancial_rows(ws, fred_us_nonfinancial_rows)
 
     code_ws = wb.create_sheet("비금융자산_코드")
     append_rows(code_ws, [["트랜잭션코드", "트랜잭션명"], *[[row["트랜잭션코드"], row["트랜잭션명"]] for row in payload["codes"]]])
@@ -356,6 +368,7 @@ def build_info_sheet(wb: Workbook, payloads: dict[str, Any]) -> None:
         ["항목", "내용"],
         ["FRED", f"행 {payloads['fred']['summary']['행수']}, 연도 {payloads['fred']['years'][0]}-{payloads['fred']['years'][-1]}, 코드순서 유지"],
         ["OECD 비금융자산", f"Total economy, 요청 트랜잭션 순서 유지, 비확정값 메모 {payloads['table9b']['summary']['비확정값_노트수']}개"],
+        ["FRED 미국 비금융자산", f"OECD 비금융자산 NN 미국 결측분을 FRED 6개 코드 합산으로 보강 {payloads['table9b']['summary'].get('FRED_US_NN_보강행수', 0)}행, 연한 빨간색 표시"],
         ["OECD 금융순자산", f"국가 행/연도 열 피벗, 비확정값 메모 {payloads['financial']['summary']['메모수']}개"],
         ["ABS 호주 순금융자산", f"ABS 520410 산출 행 {payloads['financial']['summary'].get('ABS_520410_보강행수', 0)}개, 금융자산-부채로 계산 후 옅은 보라색 표시"],
         ["OECD GDP", f"OECD 회원국 {payloads['gdp']['summary']['OECD회원국수']}개, 지출접근 보강 {payloads['gdp']['summary']['지출접근보강셀수']}셀, 비확정값 메모 {payloads['gdp']['summary']['메모수']}개"],
@@ -388,17 +401,25 @@ def build_workbook(payloads: dict[str, Any]) -> None:
 
 def verify_workbook() -> dict[str, int | str]:
     wb = load_workbook(FINAL_WORKBOOK)
-    comments = purple = yellow = korea_rows = korea_cells = abs_rows = abs_cells = 0
+    comments = purple = yellow = korea_rows = korea_cells = abs_rows = abs_cells = fred_us_rows = fred_us_cells = 0
     country_columns = {"비금융자산_피벗": 3, "금융순자산_피벗": 1, "GDP_OECD회원국": 1}
     for ws in wb.worksheets:
         country_col = country_columns.get(ws.title)
         for row in ws.iter_rows():
             is_korea_row = bool(country_col and row[0].row > 1 and ws.cell(row=row[0].row, column=country_col).value == "Korea")
             is_abs_row = ws.title == "금융순자산_피벗" and row[0].row > 1 and ws.cell(row=row[0].row, column=2).value == "AUS_ABS"
+            is_fred_us_row = (
+                ws.title == "비금융자산_피벗"
+                and row[0].row > 1
+                and ws.cell(row=row[0].row, column=1).value == "NN"
+                and ws.cell(row=row[0].row, column=3).value == "United States"
+            )
             if is_korea_row:
                 korea_rows += 1
             if is_abs_row:
                 abs_rows += 1
+            if is_fred_us_row:
+                fred_us_rows += 1
             for cell in row:
                 if cell.comment:
                     comments += 1
@@ -413,6 +434,8 @@ def verify_workbook() -> dict[str, int | str]:
                         korea_cells += 1
                 if is_abs_row and fill == "00EADCF8":
                     abs_cells += 1
+                if is_fred_us_row and fill == "00F4CCCC":
+                    fred_us_cells += 1
     return {
         "sheet_count": len(wb.sheetnames),
         "comments": comments,
@@ -422,6 +445,8 @@ def verify_workbook() -> dict[str, int | str]:
         "korea_highlight_cells": korea_cells,
         "abs_520410_highlight_rows": abs_rows,
         "abs_520410_highlight_cells": abs_cells,
+        "fred_us_nonfinancial_highlight_rows": fred_us_rows,
+        "fred_us_nonfinancial_highlight_cells": fred_us_cells,
         "file_size": FINAL_WORKBOOK.stat().st_size,
     }
 
