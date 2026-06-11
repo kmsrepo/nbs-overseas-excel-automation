@@ -50,11 +50,8 @@ HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 HEADER_FONT = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
 BASE_FONT = Font(name="Calibri", size=10)
 THIN_GRAY = Side(style="thin", color="D9E2F3")
-YELLOW_FILL = PatternFill("solid", fgColor="FFF2CC")
 PURPLE_FILL = PatternFill("solid", fgColor="D9D2E9")
-YELLOW_FONT = Font(name="Calibri", size=10, bold=True, color="9C6500")
 PURPLE_FONT = Font(name="Calibri", size=10, bold=True, color="351C75")
-YELLOW_BORDER = Border(outline=True, left=Side(style="thin", color="BF9000"), right=Side(style="thin", color="BF9000"), top=Side(style="thin", color="BF9000"), bottom=Side(style="thin", color="BF9000"))
 PURPLE_BORDER = Border(outline=True, left=Side(style="thin", color="674EA7"), right=Side(style="thin", color="674EA7"), top=Side(style="thin", color="674EA7"), bottom=Side(style="thin", color="674EA7"))
 
 
@@ -128,10 +125,14 @@ def set_number_format(ws, start_col: int, start_row: int, number_format: str) ->
             cell.number_format = number_format
 
 
-def style_note_cell(cell, fill: PatternFill, font: Font, border: Border, number_format: str = "#,##0.000") -> None:
-    cell.fill = fill
-    cell.font = font
-    cell.border = border
+def style_fallback_cell(cell, number_format: str = "#,##0") -> None:
+    cell.fill = PURPLE_FILL
+    cell.font = PURPLE_FONT
+    cell.border = PURPLE_BORDER
+    cell.number_format = number_format
+
+
+def format_comment_cell(cell, number_format: str = "#,##0") -> None:
     cell.number_format = number_format
 
 
@@ -173,7 +174,7 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
         if not row_no or year_idx < 0:
             continue
         cell = ws.cell(row=row_no, column=5 + year_idx)
-        style_note_cell(cell, YELLOW_FILL, YELLOW_FONT, YELLOW_BORDER, "#,##0")
+        format_comment_cell(cell, "#,##0")
         add_comment(
             cell,
             "\n".join(
@@ -182,7 +183,7 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
                     f"트랜잭션: {note['트랜잭션코드']} {note['트랜잭션명']}",
                     f"나라/통화: {note['나라']} / {note['화폐단위']}",
                     f"연도: {note['연도']}",
-                    f"값(현지통화): {note['값_현지통화']}",
+                    f"값(백만 현지통화): {note['값_백만현지통화']}",
                 ]
             ),
         )
@@ -202,14 +203,14 @@ def build_financial_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
         rows.append([row["나라"], row["국가코드"], row["화폐단위"], row["지표코드"], row["지표명"], row["단위"], *[row.get(year) for year in payload["years"]]])
     append_rows(ws, rows)
     format_sheet(ws, freeze_cols=6)
-    set_number_format(ws, 7, 2, "#,##0.000")
+    set_number_format(ws, 7, 2, "#,##0")
     for note in payload["notes"]:
         row_no = row_index.get((note["나라"], note["화폐단위"]))
         year_idx = payload["years"].index(note["연도"]) if note["연도"] in payload["years"] else -1
         if not row_no or year_idx < 0:
             continue
         cell = ws.cell(row=row_no, column=7 + year_idx)
-        style_note_cell(cell, YELLOW_FILL, YELLOW_FONT, YELLOW_BORDER)
+        format_comment_cell(cell, "#,##0")
         add_comment(
             cell,
             "\n".join(
@@ -234,7 +235,7 @@ def build_gdp_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
         rows.append([row["나라"], row["국가코드"], row["화폐단위"], row["단위"], *[row.get(year) for year in payload["years"]]])
     append_rows(ws, rows)
     format_sheet(ws, freeze_cols=4)
-    set_number_format(ws, 5, 2, "#,##0.000")
+    set_number_format(ws, 5, 2, "#,##0")
     fallback_addresses: set[tuple[int, int]] = set()
     for fallback in payload["fallback_cells"]:
         row_no = row_index.get(fallback["국가코드"])
@@ -243,7 +244,7 @@ def build_gdp_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
             continue
         cell = ws.cell(row=row_no, column=5 + year_idx)
         fallback_addresses.add((cell.row, cell.column))
-        style_note_cell(cell, PURPLE_FILL, PURPLE_FONT, PURPLE_BORDER)
+        style_fallback_cell(cell)
     for note in payload["notes"]:
         row_no = row_index.get(note["국가코드"])
         year_idx = payload["years"].index(note["연도"]) if note["연도"] in payload["years"] else -1
@@ -251,9 +252,9 @@ def build_gdp_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
             continue
         cell = ws.cell(row=row_no, column=5 + year_idx)
         if (cell.row, cell.column) in fallback_addresses:
-            style_note_cell(cell, PURPLE_FILL, PURPLE_FONT, PURPLE_BORDER)
+            style_fallback_cell(cell)
         else:
-            style_note_cell(cell, YELLOW_FILL, YELLOW_FONT, YELLOW_BORDER)
+            format_comment_cell(cell, "#,##0")
         add_comment(
             cell,
             "\n".join(
@@ -278,7 +279,7 @@ def build_info_sheet(wb: Workbook, payloads: dict[str, Any]) -> None:
         ["OECD 금융순자산", f"국가 행/연도 열 피벗, 비확정값 메모 {payloads['financial']['summary']['메모수']}개"],
         ["OECD GDP", f"OECD 회원국 {payloads['gdp']['summary']['OECD회원국수']}개, 지출접근 보강 {payloads['gdp']['summary']['지출접근보강셀수']}셀, 비확정값 메모 {payloads['gdp']['summary']['메모수']}개"],
         ["GDP 보강 표시", "지출접근법으로 보강한 셀은 보라색 채우기"],
-        ["비확정값 표시", "관측상태가 A가 아닌 셀은 메모 작성. GDP 보강셀이 아닌 경우 노란색 채우기"],
+        ["비확정값 표시", "관측상태가 A가 아닌 셀은 메모만 작성. GDP 지출접근 보강 셀은 보라색 채우기"],
         ["FRED 원천", payloads["fred"]["summary"]["원천파일"]],
         ["비금융자산 원천", payloads["table9b"]["summary"]["원천파일"]],
         ["금융순자산 원천", payloads["financial"]["summary"]["원천파일"]],

@@ -65,7 +65,7 @@ def main() -> int:
             if row is None:
                 pivot_row[year] = None
                 continue
-            value = parse_number(row["값_현지통화_승수반영"])
+            value = parse_number(row["값"])
             pivot_row[year] = value
             if row["관측상태코드"] not in NORMAL_STATUS:
                 notes.append(
@@ -75,7 +75,7 @@ def main() -> int:
                         "나라": row["국가명"],
                         "화폐단위": row["통화"],
                         "연도": year,
-                        "값_현지통화": value,
+                        "값_백만현지통화": value,
                         "관측상태코드": row["관측상태코드"],
                         "관측상태명": row["관측상태명"],
                     }
@@ -94,7 +94,7 @@ def main() -> int:
             "원자료주소": log_row["원자료주소"],
             "탐색기주소": log_row["탐색기주소"],
             "필터": "섹터=Total economy(S1), 단위=XDC National currency, 가격기준=Current prices(V), 변환=N",
-            "값정의": "값_현지통화_승수반영 = OECD OBS_VALUE * 10^UNIT_MULT",
+            "값정의": "피벗 셀 값 = OECD OBS_VALUE, 단위는 백만 현지통화",
             "행수": len(pivot_rows),
             "비확정값_노트수": len(notes),
             "국가수": len({row["나라"] for row in pivot_rows}),
