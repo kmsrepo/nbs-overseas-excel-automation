@@ -1,0 +1,55 @@
+name: Weekly overseas Excel collection release
+
+on:
+  schedule:
+    # Every Monday 09:00 KST
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  collect-build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set collection timestamp
+        id: timestamp
+        run: |
+          COLLECTION_TS="$(TZ=Asia/Seoul date '+%Y-%m-%d_%H-%M-%S_KST')"
+          echo "collection_ts=${COLLECTION_TS}" >> "${GITHUB_OUTPUT}"
+          echo "tag=collection-${COLLECTION_TS}" >> "${GITHUB_OUTPUT}"
+          echo "title=해외자료 수집 ${COLLECTION_TS}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements-actions.txt
+
+      - name: Collect data and build requested pivot workbook
+        run: python overseas_source_collection/scripts/build_requested_excel_outputs_actions.py
+
+      - name: Rename release assets with timestamp
+        run: |
+          mkdir -p release_assets
+          cp "outputs/requested_pivot_workbook/요청사항반영_피벗통합_메모포함.xlsx" \
+            "release_assets/요청사항반영_피벗통합_메모포함_${{ steps.timestamp.outputs.collection_ts }}.xlsx"
+          cp "outputs/requested_pivot_workbook/요청사항반영_엑셀생성로그.csv" \
+            "release_assets/요청사항반영_엑셀생성로그_${{ steps.timestamp.outputs.collection_ts }}.csv"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.timestamp.outputs.tag }}" \
+            release_assets/* \
+            --title "${{ steps.timestamp.outputs.title }}" \
+            --notes "주간 해외자료 자동 수집 및 요청사항 반영 피벗 엑셀 생성 결과입니다. 수집 기준시각: ${{ steps.timestamp.outputs.collection_ts }}"

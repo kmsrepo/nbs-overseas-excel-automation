@@ -1,0 +1,26 @@
+.DS_Store
+
+# Local secrets and environment files
+.secrets/
+.env
+.env.*
+!.env.example
+
+# Generated data and workbook outputs
+outputs/**/*.xlsx
+outputs/**/*.csv
+outputs/**/*.json
+outputs/**/node_modules/
+!outputs/fred_us_pivot/build_fred_pivot_payload.py
+!outputs/oecd_table9b_pivot/build_oecd_pivot_payload.py
+!outputs/oecd_financial_net_worth_pivot/build_financial_net_worth_payload.py
+!outputs/oecd_gdp_pivot/build_gdp_pivot_payload.py
+!outputs/oecd_gdp_pivot/build_gdp_oecd_members_payload.py
+
+overseas_source_collection/all_source_csvs/raw_csv/
+overseas_source_collection/all_source_csvs/*.csv
+overseas_source_collection/all_source_csvs/*.xlsx
+overseas_source_collection/fred_us/
+overseas_source_collection/oecd_financial_net_worth/
+overseas_source_collection/oecd_gdp_output_expenditure/
+overseas_source_collection/oecd_table9b_nonfinancial_assets/
