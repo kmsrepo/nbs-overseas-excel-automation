@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   collect-build-release:
     runs-on: ubuntu-latest
@@ -41,9 +44,9 @@ jobs:
         run: |
           mkdir -p release_assets
           cp "outputs/requested_pivot_workbook/요청사항반영_피벗통합_메모포함.xlsx" \
-            "release_assets/요청사항반영_피벗통합_메모포함_${{ steps.timestamp.outputs.collection_ts }}.xlsx"
+            "release_assets/requested_pivot_workbook_${{ steps.timestamp.outputs.collection_ts }}.xlsx"
           cp "outputs/requested_pivot_workbook/요청사항반영_엑셀생성로그.csv" \
-            "release_assets/요청사항반영_엑셀생성로그_${{ steps.timestamp.outputs.collection_ts }}.csv"
+            "release_assets/build_log_${{ steps.timestamp.outputs.collection_ts }}.csv"
 
       - name: Create GitHub Release
         env:
