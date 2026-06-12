@@ -10,6 +10,8 @@ import json
 import pathlib
 import subprocess
 import sys
+import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from typing import Any
 
@@ -71,6 +73,12 @@ KOREA_FILL = PatternFill("solid", fgColor="E2F0D9")
 KOREA_FONT_COLOR = "0000FF"
 ABS_DERIVED_FILL = PatternFill("solid", fgColor="EADCF8")
 FRED_US_NONFINANCIAL_FILL = PatternFill("solid", fgColor="F4CCCC")
+SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+ET.register_namespace("", SPREADSHEET_NS)
+ET.register_namespace("r", OFFICE_REL_NS)
 
 
 def write_csv(path: pathlib.Path, fieldnames: list[str], rows: list[dict[str, str]]) -> None:
@@ -247,6 +255,87 @@ def fred_sum_formula(code_to_row: dict[str, int], year_to_col: dict[str, int], y
     return f"=SUM({refs})"
 
 
+def fred_sum_cached_value(
+    wb: Workbook,
+    code_to_row: dict[str, int],
+    year_to_col: dict[str, int],
+    year: str,
+    codes: list[str],
+) -> float:
+    fred_ws = wb["FRED_피벗"]
+    col_no = year_to_col[year]
+    values = [fred_ws.cell(row=code_to_row[code], column=col_no).value for code in codes]
+    return sum(float(value or 0) for value in values)
+
+
+def cached_number_text(value: float) -> str:
+    if abs(value - round(value)) < 0.0000001:
+        return str(int(round(value)))
+    return format(value, ".15g")
+
+
+def sheet_xml_path(archive: zipfile.ZipFile, sheet_name: str) -> str:
+    workbook_root = ET.fromstring(archive.read("xl/workbook.xml"))
+    rel_id = None
+    for sheet in workbook_root.findall(f".//{{{SPREADSHEET_NS}}}sheet"):
+        if sheet.attrib.get("name") == sheet_name:
+            rel_id = sheet.attrib[f"{{{OFFICE_REL_NS}}}id"]
+            break
+    if rel_id is None:
+        raise KeyError(f"Workbook is missing sheet: {sheet_name}")
+
+    rels_root = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+    for relationship in rels_root.findall(f".//{{{PACKAGE_REL_NS}}}Relationship"):
+        if relationship.attrib.get("Id") != rel_id:
+            continue
+        target = relationship.attrib["Target"]
+        return target.lstrip("/") if target.startswith("/") else f"xl/{target}"
+    raise KeyError(f"Workbook is missing relationship for sheet: {sheet_name}")
+
+
+def add_formula_cached_values(workbook_path: pathlib.Path, sheet_name: str, cached_values: dict[str, float]) -> None:
+    if not cached_values:
+        return
+    with zipfile.ZipFile(workbook_path, "r") as archive:
+        target_sheet = sheet_xml_path(archive, sheet_name)
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False, dir=workbook_path.parent) as temp_file:
+        temp_path = pathlib.Path(temp_file.name)
+
+    try:
+        with zipfile.ZipFile(workbook_path, "r") as source, zipfile.ZipFile(
+            temp_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+        ) as target:
+            for item in source.infolist():
+                content = source.read(item.filename)
+                if item.filename == target_sheet:
+                    content = add_cached_values_to_sheet_xml(content, cached_values)
+                target.writestr(item, content)
+        temp_path.replace(workbook_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def add_cached_values_to_sheet_xml(sheet_xml: bytes, cached_values: dict[str, float]) -> bytes:
+    root = ET.fromstring(sheet_xml)
+    for coordinate, value in cached_values.items():
+        cell = root.find(f".//{{{SPREADSHEET_NS}}}c[@r='{coordinate}']")
+        if cell is None or cell.find(f"{{{SPREADSHEET_NS}}}f") is None:
+            continue
+        cached = cell.find(f"{{{SPREADSHEET_NS}}}v")
+        if cached is None:
+            cached = ET.Element(f"{{{SPREADSHEET_NS}}}v")
+            formula_index = next(
+                (index for index, child in enumerate(list(cell)) if child.tag == f"{{{SPREADSHEET_NS}}}f"),
+                -1,
+            )
+            cell.insert(formula_index + 1 if formula_index >= 0 else len(cell), cached)
+        cached.text = cached_number_text(value)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 def add_comment(cell, text: str) -> None:
     cell.comment = Comment(text, "Codex")
 
@@ -266,7 +355,7 @@ def build_fred_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
     set_number_format(ws, 3, 2, "#,##0")
 
 
-def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
+def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> dict[str, float]:
     ws = wb.create_sheet("비금융자산_피벗")
     headers = ["트랜잭션코드", "트랜잭션명", "나라", "화폐단위", *payload["years"]]
     row_index: dict[tuple[str, str, str, str], int] = {}
@@ -283,9 +372,19 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
         rows.append([row["트랜잭션코드"], row["트랜잭션명"], row["나라"], row["화폐단위"], *[row.get(year) for year in payload["years"]]])
     append_rows(ws, rows)
     fred_code_to_row, fred_year_to_col = fred_sheet_indexes(wb)
+    formula_cached_values: dict[str, float] = {}
     for row_no, codes in fred_formula_rows:
         for year_idx, year in enumerate(payload["years"], start=5):
-            ws.cell(row=row_no, column=year_idx).value = fred_sum_formula(fred_code_to_row, fred_year_to_col, str(year), codes)
+            cell = ws.cell(row=row_no, column=year_idx)
+            year_text = str(year)
+            cell.value = fred_sum_formula(fred_code_to_row, fred_year_to_col, year_text, codes)
+            formula_cached_values[cell.coordinate] = fred_sum_cached_value(
+                wb,
+                fred_code_to_row,
+                fred_year_to_col,
+                year_text,
+                codes,
+            )
     format_sheet(ws, freeze_cols=4)
     set_number_format(ws, 5, 2, "#,##0")
     for note in payload["notes"]:
@@ -314,6 +413,7 @@ def build_table9b_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
     code_ws = wb.create_sheet("비금융자산_코드")
     append_rows(code_ws, [["트랜잭션코드", "트랜잭션명"], *[[row["트랜잭션코드"], row["트랜잭션명"]] for row in payload["codes"]]])
     format_sheet(code_ws, freeze_cols=1)
+    return formula_cached_values
 
 
 def build_financial_sheet(wb: Workbook, payload: dict[str, Any]) -> None:
@@ -426,7 +526,7 @@ def build_workbook(payloads: dict[str, Any]) -> None:
     wb = Workbook()
     wb.remove(wb.active)
     build_fred_sheet(wb, payloads["fred"])
-    build_table9b_sheet(wb, payloads["table9b"])
+    table9b_cached_values = build_table9b_sheet(wb, payloads["table9b"])
     build_financial_sheet(wb, payloads["financial"])
     build_gdp_sheet(wb, payloads["gdp"])
     build_info_sheet(wb, payloads)
@@ -434,6 +534,7 @@ def build_workbook(payloads: dict[str, Any]) -> None:
     wb.calculation.fullCalcOnLoad = True
     wb.calculation.forceFullCalc = True
     wb.save(FINAL_WORKBOOK)
+    add_formula_cached_values(FINAL_WORKBOOK, "비금융자산_피벗", table9b_cached_values)
 
 
 def verify_workbook() -> dict[str, int | str]:
@@ -476,6 +577,21 @@ def verify_workbook() -> dict[str, int | str]:
                     fred_us_cells += 1
                 if is_fred_us_row and cell.column >= 5 and isinstance(cell.value, str) and cell.value.startswith("=SUM("):
                     fred_us_formula_cells += 1
+    data_only_wb = load_workbook(FINAL_WORKBOOK, data_only=True, read_only=True)
+    data_only_ws = data_only_wb["비금융자산_피벗"]
+    fred_us_cached_value_cells = 0
+    for row_no in range(2, data_only_ws.max_row + 1):
+        is_fred_us_row = (
+            data_only_ws.cell(row=row_no, column=3).value == "United States"
+            and data_only_ws.cell(row=row_no, column=2).value
+            in {"Total non-financial assets, net", "Real estate at market value (FRED 3-series sum)"}
+        )
+        if not is_fred_us_row:
+            continue
+        for col_no in range(5, data_only_ws.max_column + 1):
+            if isinstance(data_only_ws.cell(row=row_no, column=col_no).value, (int, float)):
+                fred_us_cached_value_cells += 1
+    data_only_wb.close()
     return {
         "sheet_count": len(wb.sheetnames),
         "comments": comments,
@@ -488,6 +604,7 @@ def verify_workbook() -> dict[str, int | str]:
         "fred_us_derived_highlight_rows": fred_us_rows,
         "fred_us_derived_highlight_cells": fred_us_cells,
         "fred_us_derived_formula_cells": fred_us_formula_cells,
+        "fred_us_derived_cached_value_cells": fred_us_cached_value_cells,
         "file_size": FINAL_WORKBOOK.stat().st_size,
     }
 
