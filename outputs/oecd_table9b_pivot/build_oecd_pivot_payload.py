@@ -15,7 +15,9 @@ OUT_DIR = ROOT / "outputs" / "oecd_table9b_pivot"
 LONG_CSV = SOURCE_DIR / "oecd_비금융자산_대차대조표_2000_2025_현지통화_긴형식.csv"
 LOG_CSV = SOURCE_DIR / "oecd_비금융자산_수집로그.csv"
 FRED_PAYLOAD = ROOT / "outputs" / "fred_us_pivot" / "fred_pivot_payload.json"
-TRANSACTION_ORDER = ["NN", "N1N", "N111N", "N112N", "N1121N", "N211N"]
+# N1N and N2N expose the OECD produced and non-produced asset totals before
+# the existing detailed asset accounts in the workbook.
+TRANSACTION_ORDER = ["NN", "N1N", "N2N", "N111N", "N112N", "N1121N", "N211N"]
 FRED_US_NONFINANCIAL_CODES = [
     "BOGZ1LM152010005A",
     "BOGZ1LM102010005A",
