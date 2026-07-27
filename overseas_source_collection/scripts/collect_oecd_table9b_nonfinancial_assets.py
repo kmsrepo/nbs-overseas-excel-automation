@@ -16,7 +16,10 @@ OUT_DIR = ROOT / "oecd_table9b_nonfinancial_assets"
 RAW_DIR = OUT_DIR / "raw"
 START_YEAR = "2000"
 END_YEAR = "2025"
-INSTR_ASSETS = ["NN", "N1N", "N111N", "N112N", "N1121N", "N211N"]
+# Keep the broad produced/non-produced asset accounts next to each other before
+# their more detailed components.  The trailing ``N`` denotes net values in the
+# OECD Table 9B instrument/asset codelist.
+INSTR_ASSETS = ["NN", "N1N", "N2N", "N111N", "N112N", "N1121N", "N211N"]
 DATAFLOW = "OECD.SDD.NAD:DSD_NASEC10@DF_TABLE9B(1.1)"
 DATA_URL = (
     "https://sdmx.oecd.org/public/rest/v1/data/"
@@ -268,4 +271,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
